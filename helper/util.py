@@ -2,7 +2,6 @@ import os
 import time
 import random
 import operator
-from ast import Tuple
 from collections import OrderedDict
 from functools import reduce
 from typing import Any, Dict, List, Mapping, Optional, Sequence
@@ -336,10 +335,10 @@ class Util:
 
 
     @staticmethod
-    def terminal_size() -> Tuple[int, int]:
+    def terminal_size() -> tuple[int, int]:
         """Get the size of the terminal
         Returns:
-            Tuple[int, int]: The width and height of the terminal
+            tuple[int, int]: The width and height of the terminal
         """
         width, height = os.get_terminal_size()
         return width, height

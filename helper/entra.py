@@ -357,6 +357,18 @@ class GraphConnection(BaseGraphClient):
     def get_bitlocker_recovery_keys(self) -> dict:
         """Get all bitlocker recovery keys."""
         return self.get_all_pages("informationProtection/bitlocker/recoveryKeys")
+    
+    def get_device_management_configurations(self) -> dict:
+        """Get device management configurations."""
+        return self.get_all_pages("deviceManagement/deviceConfigurations")
+    
+    def get_device_management_configuration(self, configuration_id: str) -> dict:
+        """Get a device management configuration."""
+        return self.get_request(f"deviceManagement/deviceConfigurations/{configuration_id}")
+    
+    def get_device_management_configuration_device_status(self, configuration_id: str) -> dict:
+        """Get the device status of a device management configuration."""
+        return self.get_request(f"deviceManagement/deviceConfigurations/{configuration_id}/deviceStatuses")
     #endregion
 
     #region Identity Governance
@@ -567,6 +579,14 @@ class GraphConnection(BaseGraphClient):
     def delete_user_manager(self, user_id: str) -> dict:
         """Remove user's manager."""
         return self.delete_request(f"users/{user_id}/manager/$ref")
+    
+    def get_user_authentication_methods(self, user_id: str) -> dict:
+        """Get user's authentication methods."""
+        return self.get_request(f"users/{user_id}/authentication/methods")
+    
+    def delete_user_ms_authenticator_app(self, user_id: str, authmethod_id: str) -> dict:
+        """Delete user's Microsoft Authenticator app."""
+        return self.delete_request(f"users/{user_id}/authentication/methods/microsoftAuthenticator/{authmethod_id}")
     #endregion
 
     #region Helper Functions

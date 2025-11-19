@@ -587,6 +587,14 @@ class GraphConnection(BaseGraphClient):
     def delete_user_ms_authenticator_app(self, user_id: str, authmethod_id: str) -> dict:
         """Delete user's Microsoft Authenticator app."""
         return self.delete_request(f"users/{user_id}/authentication/methods/microsoftAuthenticator/{authmethod_id}")
+    
+    def get_owned_objects(self, user_id: str) -> dict:
+        """Get objects owned by a user."""
+        return self.get_request(f"users/{user_id}/ownedObjects")
+    
+    def get_owned_devices(self, user_id: str) -> dict:
+        """Get devices owned by a user."""
+        return self.get_request(f"users/{user_id}/ownedDevices")
     #endregion
 
     #region Helper Functions

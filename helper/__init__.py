@@ -5,6 +5,7 @@ from .util import Util
 from .logo import Logo
 from .log import Logger
 from .env import Dotenv
+from .tui import TUI
 
 # Microsoft
 from .auth import get_graph_token, refresh_token
@@ -28,4 +29,5 @@ all = [
     "AzureConnection",
     "GraphConnection",
     "DefenderConnection",
+    "TUI",
 ]

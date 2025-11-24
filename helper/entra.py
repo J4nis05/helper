@@ -277,6 +277,10 @@ class GraphConnection(BaseGraphClient):
         """Get all groups."""
         return self.get_all_pages("groups")
 
+    def get_group(self, group_id: str) -> dict:
+        """Get a specific group."""
+        return self.get_request(f"groups/{group_id}")
+
     def get_group_settings(self, group_id: str) -> dict:
         """Get settings for a specific group."""
         return self.get_request(f"groups/{group_id}/settings")
@@ -300,6 +304,14 @@ class GraphConnection(BaseGraphClient):
     def get_role_assignment_schedules(self) -> dict:
         """Get role assignment schedules (PIM)."""
         return self.get_all_pages("roleManagement/directory/roleAssignmentSchedules")
+    
+    def add_member_to_group(self, group_id: str, member_id: str) -> dict:
+        """Add a member to a group."""
+        return self.post_request(f"groups/{group_id}/members/$ref", {"@odata.id": f"https://graph.microsoft.com/v1.0/users/{member_id}"})
+    
+    def remove_member_from_group(self, group_id: str, member_id: str) -> dict:
+        """Remove a member from a group."""
+        return self.delete_request(f"groups/{group_id}/members/{member_id}/$ref")
     #endregion
 
     #region Security Defaults and Identity Protection

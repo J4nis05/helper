@@ -192,31 +192,22 @@ logo_200_normal_colour = """
 
 class Logo:
     @staticmethod
-    def print(color: bool = True, size: int = 80, console: Console = Console()):
+    def print(color: bool = True, size: int = 80):
         """Print the logo to the console
         Args:
             color (bool): Whether to print the logo in color
             size (int): The size of the logo to print
-            console (Console): The console to print the logo to
         """
         if color:
-            if size == 80:
-                console.print(logo_80_normal_colour)
-            elif size == 120:
-                console.print(logo_120_normal_colour)
-            elif size == 160:
-                console.print(logo_160_normal_colour)
-            elif size == 200:
-                console.print(logo_200_normal_colour)
+            if   size == 80:  return logo_80_normal_colour
+            elif size == 120: return logo_120_normal_colour
+            elif size == 160: return logo_160_normal_colour
+            elif size == 200: return logo_200_normal_colour
         else:
-            if size == 80:
-                console.print(logo_80_normal)
-            elif size == 120:
-                console.print(logo_120_normal)
-            elif size == 160:
-                console.print(logo_160_normal)
-            elif size == 200:
-                console.print(logo_200_normal)
+            if   size == 80:  return logo_80_normal
+            elif size == 120: return logo_120_normal
+            elif size == 160: return logo_160_normal
+            elif size == 200: return logo_200_normal
 
     @staticmethod
     def help():

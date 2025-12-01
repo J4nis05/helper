@@ -354,6 +354,10 @@ class GraphConnection(BaseGraphClient):
         """Get a specific device."""
         return self.get_request(f"devices/{device_id}")
 
+    def get_primary_owner(self, device_id: str) -> dict:
+        """Get the primary owner of a device."""
+        return self.get_request(f"devices(deviceId='{device_id}')/registeredOwners")
+
     def get_managed_devices(self) -> dict:
         """Get managed devices (Intune)."""
         return self.get_all_pages("deviceManagement/managedDevices")

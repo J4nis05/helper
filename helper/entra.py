@@ -346,6 +346,10 @@ class GraphConnection(BaseGraphClient):
         """Get all devices."""
         return self.get_all_pages("devices")
 
+    def get_device(self, device_id: str) -> dict:
+        """Get a specific device."""
+        return self.get_request(f"devices/{device_id}")
+
     def get_managed_devices(self) -> dict:
         """Get managed devices (Intune)."""
         return self.get_all_pages("deviceManagement/managedDevices")

@@ -285,6 +285,7 @@ class Util:
         rows: List[Mapping[str, Any]],
         sort_key: str,
         include_columns: Optional[Sequence[str]] = None,
+        title: str = "",
     ) -> Table:
         """
         Build a Rich Table from a list of dicts.
@@ -321,7 +322,7 @@ class Util:
             rows_sorted = sorted(rows, key=lambda r: _safe(r.get(sort_key)))
 
         # Build table
-        table = Table()
+        table = Table(title=title)
         for col in columns:
             table.add_column(str(col), header_style="bold")
 

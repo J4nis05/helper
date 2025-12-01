@@ -281,6 +281,10 @@ class GraphConnection(BaseGraphClient):
         """Get a specific group."""
         return self.get_request(f"groups/{group_id}")
 
+    def get_group_members(self, group_id: str) -> dict:
+        """Get members of a specific group."""
+        return self.get_all_pages(f"groups/{group_id}/members")
+
     def get_group_settings(self, group_id: str) -> dict:
         """Get settings for a specific group."""
         return self.get_request(f"groups/{group_id}/settings")

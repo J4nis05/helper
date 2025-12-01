@@ -1,4 +1,5 @@
 import os
+import json
 import shutil
 import mimetypes
 import hashlib
@@ -53,6 +54,23 @@ class FileHandler:
             content = file.read()
 
         return content
+    
+
+    def read_json(path: str, encoding: str = "utf-8") -> dict:
+        """Read a JSON File and return the Contents
+
+        Args:
+            path (str): Path to the JSON File
+            encoding (str, optional): Encoding to Use, defaults to utf-8
+        Returns:
+            dict: JSON Contents
+        """
+
+        assert type(path) == str, "[FileHandler.read_json()] Path must be a String"
+
+        with open(path, "r", encoding=encoding) as file:
+            content = json.load(file)
+        return content
 
 
     def write(path: str, content: str | bytes, encoding: str = "utf-8") -> bool:
@@ -82,6 +100,31 @@ class FileHandler:
                 file.write(content)
         except Exception as e:
             print(f"[FileHandler.write()] Action Failed with Error:\n{e}")
+            return False
+
+        return True
+
+
+    def write_json(path: str, content: dict, encoding: str = "utf-8") -> bool:
+        """Write a JSON File and return the Contents
+
+        Args:
+            path (str): Path to the JSON File
+            content (dict): Content that should be written
+            encoding (str, optional): Encoding to Use, defaults to utf-8
+
+        Returns:
+            bool: True if Action was successful
+        """
+
+        assert type(path) == str, "[FileHandler.write_json()] Path must be a String"
+        assert isinstance(content, dict), "[FileHandler.write_json()] Content must be a Dictionary"
+
+        try:
+            with open(path, "w", encoding=encoding) as file:
+                json.dump(content, file, indent=4)
+        except Exception as e:
+            print(f"[FileHandler.write_json()] Action Failed with Error:\n{e}")
             return False
 
         return True

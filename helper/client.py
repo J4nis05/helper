@@ -1,4 +1,5 @@
-﻿from typing import Any, Dict, Optional, Union
+﻿from contextlib import contextmanager
+from typing import Any, Dict, Iterator, Optional, Union
 import json
 
 import requests
@@ -8,6 +9,18 @@ from urllib3.util.retry import Retry
 
 from helper import Util, FileHandler
 from helper import get_graph_token
+
+
+class _ThrottleSafeRetry(Retry):
+    """Retry idempotent methods normally, but non-idempotent ones (POST, PATCH) only on 429.
+
+    A 429 guarantees the request was not processed, so resending it cannot create duplicates.
+    """
+
+    def is_retry(self, method: str, status_code: int, has_retry_after: bool = False) -> bool:
+        if status_code == 429 and self.status_forcelist and status_code in self.status_forcelist:
+            return True
+        return super().is_retry(method, status_code, has_retry_after)
 
 
 class BaseGraphClient:
@@ -24,27 +37,29 @@ class BaseGraphClient:
         self.api_url = api_url.rstrip("/")
         self.api_version = api_version.strip("/")
 
+        self.timeout = timeout
+        self.raise_on_error = raise_on_error
+
+        # urlopen takes a single timeout, requests also accepts a (connect, read) tuple
+        self.token_timeout = sum(timeout) if isinstance(timeout, tuple) else timeout
         self.token, self.auth_response = get_graph_token(
-            self.tenant, self.client, self.secret, self.scope
+            self.tenant, self.client, self.secret, self.scope, timeout=self.token_timeout
         )
         self.header = {
             "Authorization": f"Bearer {self.token}",
             "Accept": "application/json",
         }
 
-        self.timeout = timeout
-        self.raise_on_error = raise_on_error
-
         self.ntfs_reserved = ['<', '>', ':', '"', '/', "\\", "|", "?", "*"]
         self.history: Dict[str, Dict[str, Any]] = {}
 
         self.session: Session = requests.Session()
         if enable_retries:
-            retry = Retry(
+            retry = _ThrottleSafeRetry(
                 total=max_retries,
                 backoff_factor=backoff_factor,
                 status_forcelist=[429, 500, 502, 503, 504],
-                allowed_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+                allowed_methods=["GET", "HEAD", "OPTIONS", "PUT", "DELETE"],
                 respect_retry_after_header=True,
             )
             adapter = HTTPAdapter(max_retries=retry)
@@ -80,13 +95,7 @@ class BaseGraphClient:
         json_body: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
 
-        # URL Build
-        endpoint = endpoint.lstrip("/")
-        url = f"{self.api_url}/{self.api_version}/{endpoint}"
-        if params:
-            query = Util.build_query(params)
-            if query:
-                url = f"{url}?{query}"
+        url = self._build_url(endpoint, params)
 
         # Request Content Build
         headers = dict(self.header)
@@ -94,10 +103,10 @@ class BaseGraphClient:
             headers["Content-Type"] = "application/json"
 
         # For Later
-        t_key = str(Util.unix_timestamp())
+        t_key = f"{Util.unix_timestamp()}_{len(self.history)}"
         response: Optional[Response] = None
         response_json: Dict[str, Any] = {}
-        error_info: Optional[str] = None
+        error: Optional[Exception] = None
 
         try:
             response = self.session.request(
@@ -122,27 +131,49 @@ class BaseGraphClient:
             response_json = self._safe_json(response)
 
         except Exception as e:
-            error_info = str(e)
+            error = e
 
             if response is not None and not response_json:
-                text = response.text
-                response_json = {"_non_json_body": text[:4000]}
+                response_json = self._safe_json(response)
 
-            if self.raise_on_error:
-                raise
-
+        # Response is falsy for 4xx/5xx, so it must be compared against None
         self.history[t_key] = {
             "request_url"    : url,
             "request_header" : headers,
             "request_method" : method,
             "request_body"   : json_body,
-            "response_status": response.status_code if response else None,
-            "response_header": dict(response.headers) if response else {},
+            "response_status": response.status_code if response is not None else None,
+            "response_header": dict(response.headers) if response is not None else {},
             "response_json"  : response_json,
-            "error"          : error_info,
+            "error"          : str(error) if error else None,
         }
 
+        if error and self.raise_on_error:
+            raise error
+
         return response_json
+
+    def _build_url(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> str:
+        """Build the full request URL. Absolute URLs (e.g. nextLinks) are used as-is."""
+        if endpoint.startswith(("https://", "http://")):
+            url = endpoint
+        else:
+            url = f"{self.api_url}/{self.api_version}/{endpoint.lstrip('/')}"
+
+        query = Util.build_query(params) if params else ""
+        if query:
+            url = f"{url}{'&' if '?' in url else '?'}{query}"
+        return url
+
+    @contextmanager
+    def _api_version(self, version: str) -> Iterator[None]:
+        """Temporarily switch the API version, restoring it even if the request raises."""
+        previous = self.api_version
+        self.api_version = version
+        try:
+            yield
+        finally:
+            self.api_version = previous
 
     def _safe_json(self, response: Response) -> Dict[str, Any]:
         """Safely JSON deserialize and return a dict."""
@@ -157,7 +188,7 @@ class BaseGraphClient:
         """Refresh token if needed."""
         try:
             new_token, _ = get_graph_token(
-                self.tenant, self.client, self.secret, self.scope
+                self.tenant, self.client, self.secret, self.scope, timeout=self.token_timeout
             )
             if new_token and new_token != self.token:
                 self.token = new_token
@@ -172,13 +203,14 @@ class BaseGraphClient:
         paths = []
 
         # Moving Old Files
-        if not FileHandler.verify(f"{path}/old"):
-            FileHandler.mkdir(f"{path}/old")
-        files = FileHandler.scan(path)
-        for file in files:
+        old_dir = FileHandler.join([path, "old"])
+        FileHandler.mkdir(old_dir)
+        for file in FileHandler.scan(path, recursive=False):
             if file.endswith(".json"):
                 _, filename, extension = FileHandler.split(file)
-                FileHandler.move(FileHandler.join([file]), FileHandler.join([path, "old", f"{filename}{extension}"]))
+                archived = FileHandler.join([old_dir, f"{filename}{extension}"])
+                FileHandler.delete(archived)
+                FileHandler.move(file, archived)
         
         # Saving Files
         for key, data in self.history.items():

@@ -7,18 +7,21 @@ import win32security as security
 
 class Windows:
     @staticmethod
-    def account_name(sid: str) -> str:
+    def account_name(sid: "pywintypes.SIDType | str") -> str:
         """Convert a SID to an Account Name
 
         Args:
-            sid (str): The SID to convert
+            sid (PySID | str): The SID to convert, either as a PySID or in "S-1-..." form
 
         Returns:
-            str: The Account Name
+            str: The Account Name, or the SID string if it cannot be resolved
         """
 
-        assert type(sid) == str, "[Windows.account_name()] SID must be a string"
-        
+        if isinstance(sid, str):
+            sid = security.ConvertStringSidToSid(sid)
+        if not isinstance(sid, pywintypes.SIDType):
+            raise TypeError(f"[Windows.account_name()] SID must be a PySID or String, got {type(sid).__name__}")
+
         try:
             name, domain, _ = security.LookupAccountSid(None, sid)
             return f"{domain}\\{name}" if domain else name
@@ -26,17 +29,18 @@ class Windows:
             return security.ConvertSidToStringSid(sid)
     
     @staticmethod
-    def get_permissions(path: str) -> dict:
+    def get_permissions(path: str | os.PathLike) -> dict:
         """Return an ACL summary, not effective user permissions.
 
         Args:
-            path (str): The path to get the permissions for
+            path (str | PathLike): The path to get the permissions for
 
         Returns:
             dict: The permissions
         """
 
-        assert type(path) == str, "[Windows.get_permissions()] Path must be a string"
+        if not isinstance(path, (str, os.PathLike)):
+            raise TypeError(f"[Windows.get_permissions()] Path must be a String or PathLike, got {type(path).__name__}")
 
         descriptor = security.GetNamedSecurityInfo(
             os.fspath(path),

@@ -3,553 +3,749 @@ import json
 import shutil
 import mimetypes
 import hashlib
+import zipfile
 
 from enum import Enum
 from pathlib import Path
 
+PathLike = str | os.PathLike
 
 class FileTypes(Enum):
     """Shorthand for Filetypes"""
     DIR = "directory"
     TXT = "plaintext"
     BIN = "binary"
-    NON = None
+
+
+TEXT_EXTENSIONS = frozenset({
+    '.txt' , '.py'   , '.js'    , '.html'  , '.css' , '.md'        , '.json'    , '.xml'  ,
+    '.yml' , '.yaml' , '.ini'   , '.cfg'   , '.log' , '.csv'       , '.sql'     , '.sh'   ,
+    '.bat' , '.ps1'  , '.r'     , '.rb'    , '.php' , '.pl'        , '.go'      , '.rs'   ,
+    '.kt'  , '.scala', '.clj'   , '.hs'    , '.elm' , '.dart'      , '.ts'      , '.jsx'  ,
+    '.tsx' , '.vue'  , '.svelte', '.coffee', '.sass', '.scss'      , '.less'    , '.swift',
+    '.styl', '.pug'  , '.jade'  , '.haml'  , '.erb' , '.handlebars', '.mustache'
+})
+
+TEXT_MIMETYPES = frozenset({
+    'application/json'        , 'application/xml'        , 'application/javascript',
+    'application/x-javascript', 'application/x-sh'       , 'application/x-python-code',
+    'application/x-perl'      , 'application/x-ruby'     , 'application/x-php',
+    'application/sql'         , 'application/x-sql'      , 'application/x-yaml',
+    'application/yaml'        , 'application/x-httpd-php', 'application/x-tex',
+    'application/x-latex'     , 'application/rtf'
+})
+
+_OOXML = "application/vnd.openxmlformats-officedocument"
+OFFICE_MIMETYPES = {
+    # Word
+    ".doc" : "application/msword",
+    ".dot" : "application/msword",
+    ".docx": f"{_OOXML}.wordprocessingml.document",
+    ".dotx": f"{_OOXML}.wordprocessingml.template",
+    ".docm": "application/vnd.ms-word.document.macroEnabled.12",
+    ".dotm": "application/vnd.ms-word.template.macroEnabled.12",
+    # Excel
+    ".xls" : "application/vnd.ms-excel",
+    ".xlt" : "application/vnd.ms-excel",
+    ".xlsx": f"{_OOXML}.spreadsheetml.sheet",
+    ".xltx": f"{_OOXML}.spreadsheetml.template",
+    ".xlsm": "application/vnd.ms-excel.sheet.macroEnabled.12",
+    ".xltm": "application/vnd.ms-excel.template.macroEnabled.12",
+    ".xlsb": "application/vnd.ms-excel.sheet.binary.macroEnabled.12",
+    # PowerPoint
+    ".ppt" : "application/vnd.ms-powerpoint",
+    ".pot" : "application/vnd.ms-powerpoint",
+    ".pps" : "application/vnd.ms-powerpoint",
+    ".pptx": f"{_OOXML}.presentationml.presentation",
+    ".potx": f"{_OOXML}.presentationml.template",
+    ".ppsx": f"{_OOXML}.presentationml.slideshow",
+    ".pptm": "application/vnd.ms-powerpoint.presentation.macroEnabled.12",
+    ".potm": "application/vnd.ms-powerpoint.template.macroEnabled.12",
+    ".ppsm": "application/vnd.ms-powerpoint.slideshow.macroEnabled.12",
+    # Other
+    ".msg" : "application/vnd.ms-outlook",
+    ".vsd" : "application/vnd.visio",
+    ".vsdx": "application/vnd.ms-visio.drawing",
+}
+
+# Top-level folder inside an OOXML zip -> (default mimetype, extensions of that family)
+_OOXML_FAMILIES = {
+    "word/" : (OFFICE_MIMETYPES[".docx"], {".docx", ".dotx", ".docm", ".dotm"}),
+    "xl/"   : (OFFICE_MIMETYPES[".xlsx"], {".xlsx", ".xltx", ".xlsm", ".xltm", ".xlsb"}),
+    "ppt/"  : (OFFICE_MIMETYPES[".pptx"], {".pptx", ".potx", ".ppsx", ".pptm", ".potm", ".ppsm"}),
+    "visio/": (OFFICE_MIMETYPES[".vsdx"], {".vsdx"}),
+}
+
+# Legacy Office files share one container format (OLE2), so the extension decides
+_OLE_EXTENSIONS = {".doc", ".dot", ".xls", ".xlt", ".ppt", ".pot", ".pps", ".msg", ".vsd"}
+
+# (offset, signature, mimetype)
+_MAGIC_NUMBERS = [
+    (0, b"%PDF-"                   , "application/pdf"),
+    (0, b"\x89PNG\r\n\x1a\n"       , "image/png"),
+    (0, b"\xff\xd8\xff"            , "image/jpeg"),
+    (0, b"GIF87a"                  , "image/gif"),
+    (0, b"GIF89a"                  , "image/gif"),
+    (0, b"II*\x00"                 , "image/tiff"),
+    (0, b"MM\x00*"                 , "image/tiff"),
+    (0, b"{\\rtf"                  , "application/rtf"),
+    (0, b"\x1f\x8b"                , "application/gzip"),
+    (0, b"7z\xbc\xaf\x27\x1c"      , "application/x-7z-compressed"),
+    (0, b"Rar!\x1a\x07"            , "application/vnd.rar"),
+    (0, b"SQLite format 3\x00"     , "application/vnd.sqlite3"),
+    (0, b"%!PS"                    , "application/postscript"),
+    (0, b"OggS"                    , "application/ogg"),
+    (0, b"fLaC"                    , "audio/flac"),
+    (0, b"ID3"                     , "audio/mpeg"),
+    (8, b"WEBP"                    , "image/webp"),
+    (8, b"WAVE"                    , "audio/wav"),
+    (8, b"AVI "                    , "video/x-msvideo"),
+]
+_ZIP_MAGIC = b"PK\x03\x04"
+_OLE_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+
+# Built-in table only: the module-level functions also read the Windows registry, which differs per machine
+_BUILTIN_MIMETYPES = mimetypes.MimeTypes()
+
+# Many formats are built on these (.apk, .msi, ...), so a more specific Extension wins over them
+_GENERIC_CONTAINERS = {"application/zip", "application/x-ole-storage", "application/java-archive"}
+
+
+def _check_path(path: PathLike, func: str, name: str = "Path") -> None:
+    if not isinstance(path, (str, os.PathLike)):
+        raise TypeError(f"[FileHandler.{func}()] {name} must be a String or PathLike, got {type(path).__name__}")
+
+
+def _require_file(path: PathLike, func: str) -> None:
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"[FileHandler.{func}()] Path does not exist at {path}")
+    if not os.path.isfile(path):
+        raise IsADirectoryError(f"[FileHandler.{func}()] Path must point to a File: {path}")
 
 
 class FileHandler:
     """File and Directory Manipulation"""
 
     #region File Manipulation
-    def read(path: str, encoding: str = "utf-8", mode: str = "") -> str | bytes:
+    def read(path: PathLike, encoding: str = "utf-8", mode: str = "") -> str | bytes:
         """Read and return the Contents of a File
 
         Args:
-            path (str): Path to the File
-            encoding (str, optional): Encoding to Use, defaults to utf-8
-            mode (str, optional): Mode to use, defaults to None
+            path (PathLike): Path to the File
+            encoding (str, optional): Encoding to Use in Text Mode, defaults to utf-8
+            mode (str, optional): Mode to use. Detected via FileHandler.filetype() if empty
 
         Returns:
             (str | bytes): File Content
+
+        Raises:
+            FileNotFoundError: The Path does not exist
+            IsADirectoryError: The Path is a Directory
         """
-        
-        assert type(path) == str, "[FileHandler.read()] Path must be a String"
 
-        if not FileHandler.verify(path):
-            print(f"WARNING: File does not exist at path {path}")
-            return ""
+        _check_path(path, "read")
 
-        open_kwargs = {}
         if not mode:
             match FileHandler.filetype(path):
-                case FileTypes.TXT: read_mode = "r"; open_kwargs = {"encoding": encoding}
-                case FileTypes.BIN: read_mode = "rb"
-                case FileTypes.DIR: return ""
-        elif mode == "r":
-            read_mode = "r"
-            open_kwargs = {"encoding": encoding}
-        else:
-            read_mode = mode
+                case FileTypes.DIR: raise IsADirectoryError(f"[FileHandler.read()] Path must point to a File: {path}")
+                case FileTypes.TXT: mode = "r"
+                case _:             mode = "rb"
 
-        with open(path, read_mode, **open_kwargs) as file:
-            content = file.read()
+        with open(path, mode, encoding=None if "b" in mode else encoding) as file:
+            return file.read()
 
-        return content
-    
 
-    def read_json(path: str, encoding: str = "utf-8") -> dict:
+    def read_json(path: PathLike, encoding: str = "utf-8") -> dict:
         """Read a JSON File and return the Contents
 
         Args:
-            path (str): Path to the JSON File
+            path (PathLike): Path to the JSON File
             encoding (str, optional): Encoding to Use, defaults to utf-8
+
         Returns:
             dict: JSON Contents
         """
 
-        assert type(path) == str, "[FileHandler.read_json()] Path must be a String"
+        _check_path(path, "read_json")
 
         with open(path, "r", encoding=encoding) as file:
-            content = json.load(file)
-        return content
+            return json.load(file)
 
 
-    def write(path: str, content: str | bytes, encoding: str = "utf-8") -> bool:
+    def write(path: PathLike, content: str | bytes, encoding: str = "utf-8") -> None:
         """Write to a File. Overwrite if it exists
 
         Args:
-            path (str): Path to the File
+            path (PathLike): Path to the File
             content (str | bytes): Content that should be written
-            encoding (str, optional): Encoding to Use, defaults to utf-8
-
-        Returns:
-            bool: True if Action was successful
+            encoding (str, optional): Encoding to Use for Strings, defaults to utf-8
         """
 
-        assert type(path) == str, "[FileHandler.write()] Path must be a String"
-        assert isinstance(content, (str, bytes)), "[FileHandler.write()] Content must be a String or Bytes"
+        _check_path(path, "write")
+        if not isinstance(content, (str, bytes)):
+            raise TypeError("[FileHandler.write()] Content must be a String or Bytes")
 
-        open_kwargs = {}
-        if type(content) is str:
-            write_mode = "w"
-            open_kwargs = {"encoding": encoding}
-        else:
-            write_mode = "wb"
-
-        try:
-            with open(path, write_mode, **open_kwargs) as file:
+        if isinstance(content, str):
+            with open(path, "w", encoding=encoding) as file:
                 file.write(content)
-        except Exception as e:
-            print(f"[FileHandler.write()] Action Failed with Error:\n{e}")
-            return False
-
-        return True
+        else:
+            with open(path, "wb") as file:
+                file.write(content)
 
 
-    def write_json(path: str, content: dict, encoding: str = "utf-8") -> bool:
-        """Write a JSON File and return the Contents
+    def write_json(path: PathLike, content: dict, encoding: str = "utf-8") -> None:
+        """Write a Dictionary to a JSON File. Overwrite if it exists
 
         Args:
-            path (str): Path to the JSON File
+            path (PathLike): Path to the JSON File
             content (dict): Content that should be written
             encoding (str, optional): Encoding to Use, defaults to utf-8
-
-        Returns:
-            bool: True if Action was successful
         """
 
-        assert type(path) == str, "[FileHandler.write_json()] Path must be a String"
-        assert isinstance(content, dict), "[FileHandler.write_json()] Content must be a Dictionary"
+        _check_path(path, "write_json")
+        if not isinstance(content, dict):
+            raise TypeError("[FileHandler.write_json()] Content must be a Dictionary")
 
-        try:
-            with open(path, "w", encoding=encoding) as file:
-                json.dump(content, file, indent=4)
-        except Exception as e:
-            print(f"[FileHandler.write_json()] Action Failed with Error:\n{e}")
-            return False
-
-        return True
+        with open(path, "w", encoding=encoding) as file:
+            json.dump(content, file, indent=4)
 
 
-    def append(path: str, content: str | bytes, encoding: str = "utf-8") -> bool:
+    def append(path: PathLike, content: str | bytes, encoding: str = "utf-8") -> None:
         """(Create and) Append a given file
 
         Args:
-            path (str): Path to the File
+            path (PathLike): Path to the File
             content (str | bytes): Content that should be written
-            encoding (str, optional): Encoding to Use, defaults to utf-8
-
-        Returns:
-            bool: True if Action was successful
+            encoding (str, optional): Encoding to Use for Strings, defaults to utf-8
         """
 
-        assert type(path) == str, "[FileHandler.append()] Path must be a String"
-        assert isinstance(content, (str, bytes)), "[FileHandler.append()] Content must be a String or Bytes"
-        
-        open_kwargs = {}
-        if type(content) is str:
-            append_mode = "a"
-            open_kwargs = {"encoding": encoding}
-        else:
-            append_mode = "ab"
+        _check_path(path, "append")
+        if not isinstance(content, (str, bytes)):
+            raise TypeError("[FileHandler.append()] Content must be a String or Bytes")
 
-        try:
-            with open(path, append_mode, **open_kwargs) as file:
+        if isinstance(content, str):
+            with open(path, "a", encoding=encoding) as file:
                 file.write(content)
-        except Exception as e:
-            print(f"[FileHandler.append()] Action Failed with Error:\n{e}")
-            return False
-
-        return True
+        else:
+            with open(path, "ab") as file:
+                file.write(content)
 
 
-    def mkdir(path: str) -> bool:
-        """Creates a Directory if it doesn't exist
+    def mkdir(path: PathLike) -> None:
+        """Creates a Directory and its Parents. Does nothing if it already exists
 
         Args:
-            path (str): Path of the directory
+            path (PathLike): Path of the Directory
 
-        Returns:
-            bool: False if the Creation Failed or the Directory exists
+        Raises:
+            FileExistsError: The Path exists but is not a Directory
         """
 
-        assert type(path) == str, "[FileHandler.mkdir()] Path must be a String"
+        _check_path(path, "mkdir")
 
-        if FileHandler.verify(path): return False
-        try:
-            os.makedirs(path)
-        except Exception as e:
-            print(f"[FileHandler.mkdir()] Action Failed with Error:\n{e}")
-            return False
-        return True
+        os.makedirs(path, exist_ok=True)
 
 
-    def delete(path: str) -> bool:
-        """Attempts to delete a given Path
+    def delete(path: PathLike) -> None:
+        """Delete a File or Directory. Does nothing if it doesn't exist
 
         Args:
-            path (str): Path of the directory
-
-        Returns:
-            bool: False if the Creation Failed or the Directory exists
+            path (PathLike): Path of the File or Directory
         """
 
-        assert type(path) == str, "[FileHandler.delete()] Path must be a String"
-        if not FileHandler.verify(path): return True
+        _check_path(path, "delete")
 
-        try:
-            match FileHandler.filetype(path):
-                case FileTypes.DIR:
-                    shutil.rmtree(path)
-                case _:
-                    Path.unlink(path)
-        except Exception as e:
-            print(f"[FileHandler.delete()] Action Failed with Error:\n{e}")
-            return False
-
-        return True
+        if not os.path.exists(path):
+            return
+        if os.path.isdir(path):
+            shutil.rmtree(path)
+        else:
+            os.remove(path)
 
 
-    def copy(source: str, dest: str, exist_ok: bool = False) -> bool:
+    def copy(source: PathLike, dest: PathLike, exist_ok: bool = False) -> None:
         """Copy a File or a Directory
 
-        Args:
-            source (str): Soure Path
-            dest (str): Destination Path
-            exist_ok (bool, optional): Do not error if target Directory Exists
+        Files are copied to dest, or into it if dest is an existing Directory.
+        Directories are copied so that dest becomes the copy.
+        Missing parent Directories of dest are created.
 
-        Returns:
-            bool: True if the Copy worked, False if not
+        Args:
+            source (PathLike): Source Path
+            dest (PathLike): Destination Path
+            exist_ok (bool, optional): Merge into dest if the target Directory already exists. Defaults to False.
+
+        Raises:
+            FileNotFoundError: The Source does not exist
+            FileExistsError: Source is a Directory, dest exists and exist_ok is False
         """
 
-        assert type(source) == str, "[FileHandler.mkdir()] Source Path must be a String"
-        assert type(dest) == str, "[FileHandler.mkdir()] Destination Path must be a String"
-        
-        if not FileHandler.verify(source): return False
-        if not FileHandler.verify(dest): FileHandler.mkdir(dest)
+        _check_path(source, "copy", "Source Path")
+        _check_path(dest, "copy", "Destination Path")
 
-        try:
-            match FileHandler.filetype(source):
-                case FileTypes.DIR:
-                    shutil.copytree(source, dest, dirs_exist_ok=exist_ok)
-                case _:
-                    shutil.copy2(source, dest)
-        except Exception as e:
-            print(f"[FileHandler.copy()] Action Failed with Error:\n{e}")
-            return False
+        if not os.path.exists(source):
+            raise FileNotFoundError(f"[FileHandler.copy()] Source does not exist at {source}")
 
-        return True
+        if os.path.isdir(source):
+            shutil.copytree(source, dest, dirs_exist_ok=exist_ok)
+        else:
+            parent = os.path.dirname(dest)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            shutil.copy2(source, dest)
 
 
-    def move(source: str, dest: str) -> bool:
+    def move(source: PathLike, dest: PathLike) -> None:
         """Move a File or Directory
 
         Args:
-            source (str): Source Path
-            dest (str): Destination Path
-
-        Returns:
-            bool: True if successful
+            source (PathLike): Source Path
+            dest (PathLike): Destination Path
         """
-        
-        assert type(source) == str, "[FileHandler.move()] Source Path must be a String"
-        assert type(dest) == str, "[FileHandler.move()] Destination Path must be a String"
-        
-        try:
-            shutil.move(source, dest)
-        except Exception as e:
-            print(f"[FileHandler.move()] Action Failed with Error:\n{e}")
-            return False
-        
-        return True
+
+        _check_path(source, "move", "Source Path")
+        _check_path(dest, "move", "Destination Path")
+
+        shutil.move(source, dest)
 
 
-    def rename(source: str, dest: str) -> bool:
-        """Rename a File or directory
+    def rename(source: PathLike, dest: PathLike) -> None:
+        """Rename a File or Directory
 
         Args:
-            source (str): Old Name
-            dest (str): New Name
-
-        Returns:
-            bool: True if successful
+            source (PathLike): Old Name
+            dest (PathLike): New Name
         """
 
-        assert type(source) == str, "[FileHandler.rename()] Source Path must be a String"
-        assert type(dest) == str, "[FileHandler.rename()] Destination Path must be a String"
+        _check_path(source, "rename", "Source Path")
+        _check_path(dest, "rename", "Destination Path")
 
-        try:
-            os.rename(source, dest)
-        except Exception as e:
-            print(f"[FileHandler.rename()] Action Failed with Error:\n{e}")
-            return False
-
-        return True
+        os.rename(source, dest)
     #endregion
 
 
     #region Metadata
-    def scan(path: str, recursive: bool = True, exclude_dirs: list = []) -> list:
+    def scan(path: PathLike, recursive: bool = True, exclude_dirs: list[str] | None = None) -> list[str]:
         """Scans a Directory either only on surface or recursive
 
         Args:
-            path (str): Relative or Absolute Path to the Directory
+            path (PathLike): Relative or Absolute Path to the Directory
             recursive (bool, optional): Scan Subdirectories if True. Defaults to True.
-            exclude_dirs (list, optional): List of directory names to exclude. Defaults to None.
+            exclude_dirs (list[str], optional): Directory names to exclude. Defaults to None.
 
         Returns:
-            list: A non sorted List of all items in the directory
+            list[str]: A non sorted List of all Files in the Directory
         """
 
-        assert type(path) == str, "[FileHandler.scan()] Path must be a String"
-        
-        files = []
-        all_items = os.listdir(path)
+        _check_path(path, "scan")
+        exclude_dirs = exclude_dirs or []
 
-        for item in all_items:
+        files = []
+        for item in os.listdir(path):
             item_path = os.path.join(path, item)
             if os.path.isfile(item_path):
                 files.append(item_path)
-            elif os.path.isdir(item_path) and recursive:
-                # Check if this directory should be excluded
-                if item not in exclude_dirs:
-                    files.extend(FileHandler.scan(item_path, recursive=True, exclude_dirs=exclude_dirs))
+            elif os.path.isdir(item_path) and recursive and item not in exclude_dirs:
+                files.extend(FileHandler.scan(item_path, recursive=True, exclude_dirs=exclude_dirs))
 
         return files
 
 
-    def size(path: str) -> int:
+    def size(path: PathLike) -> int:
         """Returns the Filesize of a given path
 
         Args:
-            path (str): Path to the File
+            path (PathLike): Path to the File
 
         Returns:
-            int: Filesize
+            int: Filesize in Bytes
         """
-        
-        assert type(path) == str, "[FileHandler.size()] Path must be a String"
-        assert FileHandler.isfile(path), "[FileHandler.size()] Path must point to a File"
+
+        _check_path(path, "size")
+        _require_file(path, "size")
 
         return os.path.getsize(path)
 
 
-    def isfile(path: str) -> bool:
-        """Checks if the given path is a File
+    def isfile(path: PathLike) -> bool:
+        """Checks if the given path is an existing File
 
         Args:
-            path (str): Path to the File
+            path (PathLike): Path to the File
 
         Returns:
-            bool: True if a File, False if a Directory
+            bool: True if a File, False if a Directory or missing
         """
 
-        assert type(path) == str, "[FileHandler.isfile()] Path must be a String"
+        _check_path(path, "isfile")
 
-        allowed = [FileTypes.BIN, FileTypes.TXT]
-        if FileHandler.filetype(path) in allowed:
-            if os.path.isdir(path): TypeError("[FileHandler.isfile()] Mismatch!!! Thought it was a File, but is actually a Dir")
-            return True
-        
-        return False
+        return os.path.isfile(path)
 
 
-    def verify(path: str) -> bool:
+    def verify(path: PathLike) -> bool:
         """Verify if a given path exists
 
         Args:
-            path (str): The File Path to check
+            path (PathLike): The File Path to check
 
         Returns:
             bool: True if the Path exists, false if not
         """
 
-        assert type(path) == str, "[FileHandler.verify()] Path must be a String"
+        _check_path(path, "verify")
 
-        if os.path.exists(path):
-            return True
-        
-        return False
+        return os.path.exists(path)
 
 
-    def filetype(path: str) -> FileTypes:
+    def filetype(path: PathLike, sniff: bool = True) -> FileTypes:
         """Check the Filetype of a given Path
 
         Args:
-            path (str): Path to the File / Directory
+            path (PathLike): Path to the File / Directory
+            sniff (bool, optional): Inspect the File Content if Extension and MIME type are inconclusive. Defaults to True.
 
         Returns:
             FileTypes: File Type. Either Plaintext, Binary, or Directory
+
+        Raises:
+            FileNotFoundError: The Path does not exist
         """
 
-        assert type(path) == str, "[FileHandler.filetype()] Path must be a String"
-        assert FileHandler.verify(path), f"[FileHandler.filetype()] Path does not exist at {path}"
-
-        text_extensions = [
-            '.txt' , '.py'   , '.js'    , '.html'  , '.css' , '.md'        , '.json'    , '.xml'  ,
-            '.yml' , '.yaml' , '.ini'   , '.cfg'   , '.log' , '.csv'       , '.sql'     , '.sh'   ,
-            '.bat' , '.ps1'  , '.r'     , '.rb'    , '.php' , '.pl'        , '.go'      , '.rs'   ,
-            '.kt'  , '.scala', '.clj'   , '.hs'    , '.elm' , '.dart'      , '.ts'      , '.jsx'  ,
-            '.tsx' , '.vue'  , '.svelte', '.coffee', '.sass', '.scss'      , '.less'    , '.swift',
-            '.styl', '.pug'  , '.jade'  , '.haml'  , '.erb' , '.handlebars', '.mustache'
-        ]
-        text_mimetypes = [
-            'application/json'        , 'application/xml'        , 'application/javascript',
-            'application/x-javascript', 'application/x-sh'       , 'application/x-python-code',
-            'application/x-perl'      , 'application/x-ruby'     , 'application/x-php',
-            'application/sql'         , 'application/x-sql'      , 'application/x-yaml',
-            'application/yaml'        , 'application/x-httpd-php', 'application/x-tex',
-            'application/x-latex'     , 'application/rtf'
-        ]
+        _check_path(path, "filetype")
 
         path_obj = Path(path)
-        file_type = FileTypes.NON
-        found = False
-
-        mime_type, mime_encoding = mimetypes.guess_type(path)
-
-        # Is the Path a Directory?
         if path_obj.is_dir():
-            file_type = FileTypes.DIR
-            found = True
+            return FileTypes.DIR
+        if not path_obj.exists():
+            raise FileNotFoundError(f"[FileHandler.filetype()] Path does not exist at {path}")
 
-        # No MIME type found, try to find based on extension
-        if mime_type is None and not found:
-            if path_obj.suffix.lower() in text_extensions:
-                file_type = FileTypes.TXT
-                found = True
-            else:
-                file_type = FileTypes.BIN
-                found = True
+        if path_obj.suffix.lower() in TEXT_EXTENSIONS:
+            return FileTypes.TXT
 
-        # Check if it's a text-based MIME type
-        #if file_type is FileTypes.NON and mime_type.startswith('text/') or mime_type in text_mimetypes and not found:
-        if (
-                file_type is FileTypes.NON
-                and mime_type is not None
-                and (mime_type.startswith("text/") or mime_type in text_mimetypes)
-                and not found
-        ):
-            file_type = FileTypes.TXT
-            found = True
+        mime_type, _ = mimetypes.guess_type(path_obj)
+        if mime_type is not None:
+            if mime_type.startswith("text/") or mime_type in TEXT_MIMETYPES:
+                return FileTypes.TXT
+            return FileTypes.BIN
 
-        # If nothing else has been caught, set it to BIN
-        if file_type is FileTypes.NON and not found:
-            file_type = FileTypes.BIN
+        return FileHandler._sniff_text(path_obj) if sniff else FileTypes.BIN
 
-        return file_type
-    
-    
-    def hash(path: str) -> str:
+
+    def mimetype(path: PathLike, sniff: bool = True) -> str:
+        """Get the MIME type of a File, e.g. to tell Word, Excel and PowerPoint Files apart
+
+        The File Content is checked first, so renamed or extensionless Files are still recognised.
+        Falls back to the Extension, then to text/plain or application/octet-stream.
+
+        Args:
+            path (PathLike): Path to the File / Directory
+            sniff (bool, optional): Inspect the File Content. Only the Extension is used if False. Defaults to True.
+
+        Returns:
+            str: MIME type, e.g. "application/pdf". "inode/directory" for Directories
+
+        Raises:
+            FileNotFoundError: The Path does not exist
+        """
+
+        _check_path(path, "mimetype")
+
+        path_obj = Path(path)
+        if path_obj.is_dir():
+            return "inode/directory"
+        if not path_obj.exists():
+            raise FileNotFoundError(f"[FileHandler.mimetype()] Path does not exist at {path}")
+
+        suffix = path_obj.suffix.lower()
+        by_extension = OFFICE_MIMETYPES.get(suffix) or _BUILTIN_MIMETYPES.guess_type(path_obj)[0]
+
+        if sniff:
+            by_content = FileHandler._sniff_mimetype(path_obj, suffix)
+            if by_content in _GENERIC_CONTAINERS and by_extension and not by_extension.startswith("text/"):
+                return by_extension
+            if by_content:
+                return by_content
+
+        if by_extension:
+            return by_extension
+        if FileHandler.filetype(path_obj, sniff=sniff) is FileTypes.TXT:
+            return "text/plain"
+        return "application/octet-stream"
+
+
+    def _sniff_mimetype(path: Path, suffix: str) -> str | None:
+        """Detect the MIME type from the File's Magic Number
+
+        Args:
+            path (Path): Path to the File
+            suffix (str): Lowercase File Extension, used to pick the exact type inside a Container Format
+
+        Returns:
+            str | None: MIME type, or None if the Content is not recognised
+        """
+
+        with open(path, "rb") as file:
+            header = file.read(64)
+
+        if header.startswith(_ZIP_MAGIC):
+            return FileHandler._sniff_zip(path, suffix)
+        if header.startswith(_OLE_MAGIC):
+            return OFFICE_MIMETYPES[suffix] if suffix in _OLE_EXTENSIONS else "application/x-ole-storage"
+
+        if header[4:8] == b"ftyp":
+            brand = header[8:12]
+            if brand == b"qt  ":
+                return "video/quicktime"
+            if brand == b"M4A ":
+                return "audio/mp4"
+            if brand in (b"heic", b"heix", b"mif1"):
+                return "image/heic"
+            return "video/mp4"
+
+        for offset, signature, mime_type in _MAGIC_NUMBERS:
+            if offset == 8 and not header.startswith(b"RIFF"):
+                continue
+            if header[offset:offset + len(signature)] == signature:
+                return mime_type
+        return None
+
+
+    def _sniff_zip(path: Path, suffix: str) -> str:
+        """Tell apart the Formats that are Zip Archives underneath (OOXML, OpenDocument, EPUB, JAR)
+
+        Args:
+            path (Path): Path to the Zip File
+            suffix (str): Lowercase File Extension
+
+        Returns:
+            str: MIME type. application/zip if no known Format matches
+        """
+
+        try:
+            with zipfile.ZipFile(path) as archive:
+                names = archive.namelist()
+                # OpenDocument and EPUB store their exact type in a "mimetype" entry
+                if "mimetype" in names:
+                    declared = archive.read("mimetype").decode("ascii", errors="ignore").strip()
+                    if declared:
+                        return declared
+        except zipfile.BadZipFile:
+            return "application/zip"
+
+        if "[Content_Types].xml" in names:
+            for folder, (default, extensions) in _OOXML_FAMILIES.items():
+                if any(name.startswith(folder) for name in names):
+                    return OFFICE_MIMETYPES[suffix] if suffix in extensions else default
+        if "META-INF/MANIFEST.MF" in names:
+            return "application/java-archive"
+        return "application/zip"
+
+
+    def _sniff_text(path: Path, blocksize: int = 8192) -> FileTypes:
+        """Guess the Filetype by inspecting the first Block of the File
+
+        Args:
+            path (Path): Path to the File
+            blocksize (int, optional): Number of Bytes to inspect. Defaults to 8192.
+
+        Returns:
+            FileTypes: Plaintext or Binary
+        """
+
+        with open(path, "rb") as file:
+            chunk = file.read(blocksize)
+
+        if not chunk:
+            return FileTypes.TXT
+        if b"\x00" in chunk:
+            return FileTypes.BIN
+
+        try:
+            chunk.decode("utf-8")
+        except UnicodeDecodeError as e:
+            # the block may have cut a multi-byte character in half
+            return FileTypes.TXT if e.start >= len(chunk) - 3 else FileTypes.BIN
+        return FileTypes.TXT
+
+
+    def hash(path: PathLike) -> str:
         """Returns the SHA256 Hash of a File
 
         Args:
-            path (str): Path to the file
+            path (PathLike): Path to the file
 
         Returns:
             str: SHA256 hash
         """
 
-        assert type(path) == str, "[FileHandler.hash()] Path must be a String"
-        assert FileHandler.isfile(path), "[FileHandler.hash()] Path must point to a File"
+        _check_path(path, "hash")
+        _require_file(path, "hash")
 
         with open(path, "rb", buffering=0) as file:
-            hash = hashlib.file_digest(file, "sha256").hexdigest()
-        return hash
+            return hashlib.file_digest(file, "sha256").hexdigest()
+
+
+    def stats(path: PathLike) -> dict:
+        """Returns the Statistics of a File or Directory
+
+        Parts that cannot be read (e.g. no permission, file locked by another process)
+        are set to None and their error is reported in "error" instead of raising.
+
+        Args:
+            path (PathLike): Path to the File or Directory
+
+        Returns:
+            dict: Statistics of the File. "error" is None, or a dict of the failed part
+                  ("stat", "type", "permissions", "sha256") to its error message
+
+        Raises:
+            FileNotFoundError: The Path does not exist
+        """
+
+        _check_path(path, "stats")
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"[FileHandler.stats()] Path does not exist at {path}")
+
+        errors = {}
+
+        def attempt(part: str, func):
+            try:
+                return func()
+            except FileNotFoundError:
+                raise
+            except Exception as e:
+                errors[part] = f"{type(e).__name__}: {e}"
+                return None
+
+        def get_permissions() -> dict:
+            # pywin32 is Windows-only, so importing it at module level would break the package elsewhere
+            from .win import Windows
+            return Windows.get_permissions(os.fspath(path))
+
+        stats       = attempt("stat", lambda: os.stat(path))
+        mime_type   = attempt("type", lambda: FileHandler.mimetype(path))
+        permissions = attempt("permissions", get_permissions) or {}
+        sha256      = attempt("sha256", lambda: FileHandler.hash(path)) if os.path.isfile(path) else None
+
+        return {
+            "type"        : mime_type,
+            "size"        : stats.st_size if stats else None,
+            "blocks"      : getattr(stats, "st_blocks", None),
+            "device"      : stats.st_dev if stats else None,
+            "inode"       : stats.st_ino if stats else None,
+            "mode"        : stats.st_mode if stats else None,
+            "owner"       : permissions.get("owner"       , None),
+            "read"        : permissions.get("read"        , None),
+            "write"       : permissions.get("write"       , None),
+            "execute"     : permissions.get("execute"     , None),
+            "deny_read"   : permissions.get("deny_read"   , None),
+            "deny_write"  : permissions.get("deny_write"  , None),
+            "deny_execute": permissions.get("deny_execute", None),
+            "deny_other"  : permissions.get("deny_other"  , None),
+            "no_access"   : permissions.get("no_access"   , None),
+            "unsupported" : permissions.get("unsupported" , None),
+            "sha256"      : sha256,
+            "error"       : errors or None,
+        }
     #endregion
 
 
     #region Path Manipulation
-    def split(path: str) -> tuple[str, str, str]:
+    def split(path: PathLike) -> tuple[str, str, str]:
         """Split a given Path into Directory, Filename, Extension
 
         Args:
-            path (str): Path to be split
+            path (PathLike): Path to be split
 
         Returns:
             tuple[str, str, str]: Directory, Filename, Extension. Either part may be Empty
         """
 
-        assert type(path) == str, "[FileHandler.split()] Path must be a String"
+        _check_path(path, "split")
 
-        directory, file = os.path.split(path)
+        directory, file = os.path.split(os.fspath(path))
         filename, extension = os.path.splitext(file)
 
         return directory, filename, extension
 
 
-    def dirpath(path: str) -> str:
+    def dirpath(path: PathLike) -> str:
         """Split a given Path and Return the Directory
 
         Args:
-            path (str): Path to be split
+            path (PathLike): Path to be split
 
         Returns:
             str: Directory Path. May be Empty
         """
 
-        assert type(path) == str, "[FileHandler.dirpath()] Path must be a String"
-        
+        _check_path(path, "dirpath")
+
         directory, _, _ = FileHandler.split(path)
         return directory
 
 
-    def filename(path: str) -> str:
+    def filename(path: PathLike) -> str:
         """Split a given Path and Return the Filename
 
         Args:
-            path (str): Path to be split
+            path (PathLike): Path to be split
 
         Returns:
             str: Filename. May be Empty
         """
 
-        assert type(path) == str, "[FileHandler.filename()] Path must be a String"
-        
+        _check_path(path, "filename")
+
         _, filename, _ = FileHandler.split(path)
         return filename
 
 
-    def extension(path: str) -> str:
+    def extension(path: PathLike) -> str:
         """Split a given Path and Return the File Extension
 
         Args:
-            path (str): Path to be split
+            path (PathLike): Path to be split
 
         Returns:
             str: Extension. May be Empty
         """
 
-        assert type(path) == str, "[FileHandler.extension()] Path must be a String"
-        
+        _check_path(path, "extension")
+
         _, _, extension = FileHandler.split(path)
         return extension
 
 
-    def join(elements: list[str]) -> str:
-        """Merge a List of Strings into a single Path
+    def join(elements: list[PathLike]) -> str:
+        """Merge a List of Path-parts into a single Path
 
         Args:
-            elements (list[str]): List of Path-parts that should be Merged
+            elements (list[PathLike]): List of Path-parts that should be Merged
 
         Returns:
             str: Merged File Path
         """
 
-        assert isinstance(elements, list) and all(isinstance(item, str) for item in elements), "[FileHandler.join()] Elements Must be a List of Strings"
+        if not isinstance(elements, list) or not elements:
+            raise TypeError("[FileHandler.join()] Elements must be a non-empty List")
+        for element in elements:
+            _check_path(element, "join", "Element")
+
         return os.path.join(*elements)
 
 
-    def abspath(path: str):
+    def abspath(path: PathLike) -> str:
         """Returns the Absolute Path
 
         Args:
-            path (str): Relative Path
+            path (PathLike): Relative Path
 
         Returns:
             str: Absolute Path
         """
 
-        assert type(path) == str, "[FileHandler.abspath()] Path must be a String"
+        _check_path(path, "abspath")
 
         return os.path.abspath(path)
     #endregion

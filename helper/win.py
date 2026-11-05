@@ -32,11 +32,20 @@ class Windows:
     def get_permissions(path: str | os.PathLike) -> dict:
         """Return an ACL summary, not effective user permissions.
 
+        Allow and deny entries are listed separately. An account can appear in both
+        (e.g. "read" and "deny_read"); Windows then normally lets the deny win.
+
         Args:
             path (str | PathLike): The path to get the permissions for
 
         Returns:
-            dict: The permissions
+            dict: Sorted account lists for:
+                owner
+                read, write, execute                     (allowed)
+                deny_read, deny_write, deny_execute      (partially denied)
+                deny_other                               (denied delete, change permissions or take ownership)
+                no_access                                (everything denied)
+                unsupported                              (ACE types that are not evaluated, as "type <n>")
         """
 
         if not isinstance(path, (str, os.PathLike)):
@@ -54,7 +63,12 @@ class Windows:
             "read": set(),
             "write": set(),
             "execute": set(),
+            "deny_read": set(),
+            "deny_write": set(),
+            "deny_execute": set(),
+            "deny_other": set(),
             "no_access": set(),
+            "unsupported": set(),
         }
 
         dacl = descriptor.GetSecurityDescriptorDacl()
@@ -74,6 +88,12 @@ class Windows:
                 rights.FILE_ALL_ACCESS,
             )
 
+            content_rights = (
+                rights.FILE_GENERIC_READ
+                | rights.FILE_GENERIC_WRITE
+                | rights.FILE_GENERIC_EXECUTE
+            )
+
             for index in range(dacl.GetAceCount()):
                 ace = dacl.GetAce(index)
                 ace_type, flags = ace[0]
@@ -86,35 +106,33 @@ class Windows:
                     rights.ACCESS_ALLOWED_ACE_TYPE,
                     rights.ACCESS_DENIED_ACE_TYPE,
                 ):
-                    raise NotImplementedError(
-                        f"Unsupported ACE type: {ace_type}"
-                    )
+                    result["unsupported"].add(f"type {ace_type}")
+                    continue
 
                 mask = security.MapGenericMask(ace[1], mapping)
                 name = Windows.account_name(ace[2])
+                denied = ace_type == rights.ACCESS_DENIED_ACE_TYPE
 
-                if ace_type == rights.ACCESS_DENIED_ACE_TYPE:
-                    full = rights.FILE_ALL_ACCESS
-                    if mask & full == full:
-                        result["no_access"].add(name)
-                    elif mask:
-                        raise ValueError(
-                            f"Partial deny for {name}: 0x{mask:08X}. "
-                            "The requested JSON schema cannot represent it."
-                        )
+                if denied and mask & rights.FILE_ALL_ACCESS == rights.FILE_ALL_ACCESS:
+                    result["no_access"].add(name)
                     continue
+
+                prefix = "deny_" if denied else ""
 
                 # Broad categories based on content-related rights.
                 if mask & rights.FILE_READ_DATA:
-                    result["read"].add(name)
+                    result[f"{prefix}read"].add(name)
 
                 if mask & (
                     rights.FILE_WRITE_DATA | rights.FILE_APPEND_DATA
                 ):
-                    result["write"].add(name)
+                    result[f"{prefix}write"].add(name)
 
                 if mask & rights.FILE_EXECUTE:
-                    result["execute"].add(name)
+                    result[f"{prefix}execute"].add(name)
+
+                if denied and mask & ~content_rights:
+                    result["deny_other"].add(name)
 
         return {
             key: sorted(value) if isinstance(value, set) else value

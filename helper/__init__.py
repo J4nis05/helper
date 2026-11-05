@@ -1,6 +1,5 @@
 # General
 from .files import FileHandler
-from .globals import Globals
 from .util import Util
 from .log import Logger
 from .env import Dotenv
@@ -16,7 +15,6 @@ from .defender import DefenderConnection
 
 __all__ = [
     "FileHandler",
-    "Globals",
     "Util",
     "Logger",
     "Dotenv",

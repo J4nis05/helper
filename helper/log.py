@@ -10,7 +10,7 @@ class Logger:
             "info"   : "cyan",
             "debug"  : "dim"
         })
-        self.console.theme = self.theme
+        self.console.push_theme(self.theme)
         # We'll map level aliases to style names as lowercase for markup tags.
         self.level_map = {
             "error": "error",

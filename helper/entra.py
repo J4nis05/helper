@@ -125,17 +125,13 @@ class GraphConnection(BaseGraphClient):
 
     def get_setting_templates(self) -> dict:
         """Get the setting templates."""
-        self.api_version = "beta"
-        result = self.get_request("directorySettingTemplates")
-        self.api_version = "v1.0"
-        return result
+        with self._api_version("beta"):
+            return self.get_request("directorySettingTemplates")
 
     def get_settings(self) -> dict:
         """Get the settings."""
-        self.api_version = "beta"
-        result = self.get_request("settings")
-        self.api_version = "v1.0"
-        return result
+        with self._api_version("beta"):
+            return self.get_request("settings")
     
     def get_subscribed_skus(self) -> dict:
         """Get the subscribed SKUs."""
@@ -145,24 +141,13 @@ class GraphConnection(BaseGraphClient):
     #region Identity Security & Authentication Methods
     def get_authentication_methods_policy(self) -> dict:
         """Get the authentication methods policy."""
-        self.api_version = "beta"
-        result = self.get_request("policies/authenticationMethodsPolicy")
-        self.api_version = "v1.0"
-        return result
+        with self._api_version("beta"):
+            return self.get_request("policies/authenticationMethodsPolicy")
 
     def get_authentication_method_configurations(self) -> dict:
         """Get authentication method configurations."""
-        self.api_version = "beta"
-        result = self.get_all_pages("authenticationMethodConfigurations")
-        self.api_version = "v1.0"
-        return result
-
-    def get_user_authentication_methods(self, user_id: str) -> dict:
-        """Get authentication methods for a specific user."""
-        self.api_version = "beta"
-        result = self.get_all_pages(f"users/{user_id}/authentication/methods")
-        self.api_version = "v1.0"
-        return result
+        with self._api_version("beta"):
+            return self.get_all_pages("authenticationMethodConfigurations")
 
     def get_identity_security_defaults_policy(self) -> dict:
         """Get the identity security defaults enforcement policy."""
@@ -170,40 +155,30 @@ class GraphConnection(BaseGraphClient):
 
     def get_authentication_strength_policies(self) -> dict:
         """Get authentication strength policies."""
-        self.api_version = "beta"
-        result = self.get_all_pages("identity/conditionalAccess/authenticationStrength/policies")
-        self.api_version = "v1.0"
-        return result
+        with self._api_version("beta"):
+            return self.get_all_pages("identity/conditionalAccess/authenticationStrength/policies")
     #endregion
 
     #region Conditional Access
     def get_conditional_access_policies(self) -> dict:
         """Get conditional access policies."""
-        self.api_version = "beta"
-        result = self.get_all_pages("identity/conditionalAccess/policies")
-        self.api_version = "v1.0"
-        return result
+        with self._api_version("beta"):
+            return self.get_all_pages("identity/conditionalAccess/policies")
 
     def get_conditional_access_named_locations(self) -> dict:
         """Get conditional access named locations."""
-        self.api_version = "beta"
-        result = self.get_all_pages("identity/conditionalAccess/namedLocations")
-        self.api_version = "v1.0"
-        return result
+        with self._api_version("beta"):
+            return self.get_all_pages("identity/conditionalAccess/namedLocations")
 
     def get_conditional_access_templates(self) -> dict:
         """Get conditional access templates."""
-        self.api_version = "beta"
-        result = self.get_all_pages("identity/conditionalAccess/templates")
-        self.api_version = "v1.0"
-        return result
+        with self._api_version("beta"):
+            return self.get_all_pages("identity/conditionalAccess/templates")
 
     def get_conditional_access_auth_context_refs(self) -> dict:
         """Get conditional access authentication context class references."""
-        self.api_version = "beta"
-        result = self.get_all_pages("identity/conditionalAccess/authenticationContextClassReferences")
-        self.api_version = "v1.0"
-        return result
+        with self._api_version("beta"):
+            return self.get_all_pages("identity/conditionalAccess/authenticationContextClassReferences")
     #endregion
 
     #region Applications and Service Principals
@@ -266,10 +241,8 @@ class GraphConnection(BaseGraphClient):
 
     def get_identity_providers(self) -> dict:
         """Get identity providers."""
-        self.api_version = "beta"
-        result = self.get_all_pages("identity/identityProviders")
-        self.api_version = "v1.0"
-        return result
+        with self._api_version("beta"):
+            return self.get_all_pages("identity/identityProviders")
     #endregion
 
     #region Users, Groups, Roles
@@ -339,10 +312,8 @@ class GraphConnection(BaseGraphClient):
 
     def get_sign_ins(self) -> dict:
         """Get sign-in logs."""
-        self.api_version = "beta"
-        result = self.get_all_pages("auditLogs/signIns")
-        self.api_version = "v1.0"
-        return result
+        with self._api_version("beta"):
+            return self.get_all_pages("auditLogs/signIns")
     #endregion
 
     #region Device Management
@@ -398,45 +369,33 @@ class GraphConnection(BaseGraphClient):
     #region Identity Governance
     def get_entitlement_management(self) -> dict:
         """Get entitlement management."""
-        self.api_version = "beta"
-        result = self.get_request("identityGovernance/entitlementManagement")
-        self.api_version = "v1.0"
-        return result
+        with self._api_version("beta"):
+            return self.get_request("identityGovernance/entitlementManagement")
 
     def get_access_packages(self) -> dict:
         """Get access packages."""
-        self.api_version = "beta"
-        result = self.get_all_pages("identityGovernance/entitlementManagement/accessPackages")
-        self.api_version = "v1.0"
-        return result
+        with self._api_version("beta"):
+            return self.get_all_pages("identityGovernance/entitlementManagement/accessPackages")
 
     def get_entitlement_catalogs(self) -> dict:
         """Get entitlement catalogs."""
-        self.api_version = "beta"
-        result = self.get_all_pages("identityGovernance/entitlementManagement/catalogs")
-        self.api_version = "v1.0"
-        return result
+        with self._api_version("beta"):
+            return self.get_all_pages("identityGovernance/entitlementManagement/catalogs")
 
     def get_access_reviews(self) -> dict:
         """Get access reviews."""
-        self.api_version = "beta"
-        result = self.get_all_pages("identityGovernance/accessReviews")
-        self.api_version = "v1.0"
-        return result
+        with self._api_version("beta"):
+            return self.get_all_pages("identityGovernance/accessReviews")
 
     def get_lifecycle_workflows(self) -> dict:
         """Get lifecycle workflows."""
-        self.api_version = "beta"
-        result = self.get_all_pages("identityGovernance/lifecycleWorkflows")
-        self.api_version = "v1.0"
-        return result
+        with self._api_version("beta"):
+            return self.get_all_pages("identityGovernance/lifecycleWorkflows")
 
     def get_terms_of_use_agreements(self) -> dict:
         """Get terms of use agreements."""
-        self.api_version = "beta"
-        result = self.get_all_pages("identityGovernance/termsOfUse/agreements")
-        self.api_version = "v1.0"
-        return result
+        with self._api_version("beta"):
+            return self.get_all_pages("identityGovernance/termsOfUse/agreements")
     #endregion
 
     #region Directory Synchronization
@@ -446,10 +405,8 @@ class GraphConnection(BaseGraphClient):
 
     def get_directory_on_premises_sync(self) -> dict:
         """Get directory on-premises synchronization."""
-        self.api_version = "beta"
-        result = self.get_request("directory/onPremisesSynchronization")
-        self.api_version = "v1.0"
-        return result
+        with self._api_version("beta"):
+            return self.get_request("directory/onPremisesSynchronization")
     #endregion
 
     #region Teams
@@ -633,6 +590,6 @@ class GraphConnection(BaseGraphClient):
             next_link = page.get("@odata.nextLink")
             if not next_link:
                 break
-            page = self._request("GET", next_link.replace(f"{self.api_url}/{self.api_version}/", ""))
+            page = self._request("GET", next_link)
         return result
     #endregion

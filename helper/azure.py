@@ -1,6 +1,6 @@
 from typing import Optional, Dict, Any
 
-from helper import BaseGraphClient
+from helper import BaseGraphClient, Util
 
 
 class AzureConnection(BaseGraphClient):
@@ -24,6 +24,16 @@ class AzureConnection(BaseGraphClient):
             api_version=api_version, 
             **kwargs,
         )
+
+    def _build_url(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> str:
+        """ARM expects the API version as a query parameter, not a path segment."""
+        if endpoint.startswith(("https://", "http://")):
+            return super()._build_url(endpoint, params)
+
+        params = dict(params or {})
+        params.setdefault("api-version", self.api_version)
+        query = Util.build_query(params)
+        return f"{self.api_url}/{endpoint.lstrip('/')}?{query}"
 
     def get_subscriptions(self) -> dict:
         """Get all subscriptions."""
@@ -58,5 +68,5 @@ class AzureConnection(BaseGraphClient):
             next_link = page.get("@odata.nextLink") or page.get("nextLink")
             if not next_link:
                 break
-            page = self._request("GET", next_link.replace(f"{self.api_url}/{self.api_version}/", ""))
+            page = self._request("GET", next_link)
         return result

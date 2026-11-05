@@ -12,8 +12,12 @@ class Dotenv:
         self.env = self.parse_env()
     
     def read_env(self) -> str:
-        """Read environment file and return raw content."""
-        return FileHandler.read(self.path, mode="r")
+        """Read environment file and return raw content. Empty if the file is missing."""
+        try:
+            return FileHandler.read(self.path, mode="r")
+        except FileNotFoundError:
+            print(f"WARNING: File does not exist at path {self.path}")
+            return ""
     
     def parse_env(self) -> dict:
         """Parse environment file content into a dictionary."""

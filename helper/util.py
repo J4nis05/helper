@@ -28,10 +28,11 @@ class Util:
 
         assert type(array) == list, "[Util.randarr()] Input Array must be a List"
 
-        if forbidden == None: return random.choice(array)
-        while True:
-            selected = random.choice(array)
-            if selected != forbidden: return selected
+        if forbidden is None: return random.choice(array)
+        allowed = [element for element in array if element != forbidden]
+        if not allowed:
+            raise ValueError("[Util.randarr()] Every Element is forbidden")
+        return random.choice(allowed)
 
 
     @staticmethod
@@ -129,14 +130,11 @@ class Util:
             return str(first)
 
         def _generate_second():
-            second_check = 8
-            while second_check % 7 != 0:
-                second = ""
-                for i in range(0, 7):
-                    number = random.randint(1, 9)
-                    second += str(number)
-                    second_check += number
-            return second
+            # digit sum must be divisible by 7, and the last digit must be 1-7
+            while True:
+                digits = [random.randint(0, 9) for _ in range(6)] + [random.randint(1, 7)]
+                if sum(digits) % 7 == 0:
+                    return "".join(str(digit) for digit in digits)
 
         first = _generate_first()
         second = _generate_second()
@@ -155,7 +153,7 @@ class Util:
 
     @staticmethod
     def getclipboard() -> str:
-        """Copies the content to clipboard
+        """Returns the content of the clipboard
         Returns:
             str: The content of the Clipboard
         """

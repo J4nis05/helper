@@ -127,6 +127,7 @@ class FileHandler:
     """File and Directory Manipulation"""
 
     #region File Manipulation
+    @staticmethod
     def read(path: PathLike, encoding: str = "utf-8", mode: str = "") -> str | bytes:
         """Read and return the Contents of a File
 
@@ -155,6 +156,7 @@ class FileHandler:
             return file.read()
 
 
+    @staticmethod
     def read_json(path: PathLike, encoding: str = "utf-8") -> dict:
         """Read a JSON File and return the Contents
 
@@ -172,6 +174,7 @@ class FileHandler:
             return json.load(file)
 
 
+    @staticmethod
     def write(path: PathLike, content: str | bytes, encoding: str = "utf-8") -> None:
         """Write to a File. Overwrite if it exists
 
@@ -193,6 +196,7 @@ class FileHandler:
                 file.write(content)
 
 
+    @staticmethod
     def write_json(path: PathLike, content: dict, encoding: str = "utf-8") -> None:
         """Write a Dictionary to a JSON File. Overwrite if it exists
 
@@ -210,6 +214,7 @@ class FileHandler:
             json.dump(content, file, indent=4)
 
 
+    @staticmethod
     def append(path: PathLike, content: str | bytes, encoding: str = "utf-8") -> None:
         """(Create and) Append a given file
 
@@ -231,6 +236,7 @@ class FileHandler:
                 file.write(content)
 
 
+    @staticmethod
     def mkdir(path: PathLike) -> None:
         """Creates a Directory and its Parents. Does nothing if it already exists
 
@@ -246,6 +252,7 @@ class FileHandler:
         os.makedirs(path, exist_ok=True)
 
 
+    @staticmethod
     def delete(path: PathLike) -> None:
         """Delete a File or Directory. Does nothing if it doesn't exist
 
@@ -263,6 +270,7 @@ class FileHandler:
             os.remove(path)
 
 
+    @staticmethod
     def copy(source: PathLike, dest: PathLike, exist_ok: bool = False) -> None:
         """Copy a File or a Directory
 
@@ -295,6 +303,7 @@ class FileHandler:
             shutil.copy2(source, dest)
 
 
+    @staticmethod
     def move(source: PathLike, dest: PathLike) -> None:
         """Move a File or Directory
 
@@ -309,6 +318,7 @@ class FileHandler:
         shutil.move(source, dest)
 
 
+    @staticmethod
     def rename(source: PathLike, dest: PathLike) -> None:
         """Rename a File or Directory
 
@@ -325,6 +335,7 @@ class FileHandler:
 
 
     #region Metadata
+    @staticmethod
     def scan(path: PathLike, recursive: bool = True, exclude_dirs: list[str] | None = None) -> list[str]:
         """Scans a Directory either only on surface or recursive
 
@@ -351,6 +362,7 @@ class FileHandler:
         return files
 
 
+    @staticmethod
     def size(path: PathLike) -> int:
         """Returns the Filesize of a given path
 
@@ -367,6 +379,7 @@ class FileHandler:
         return os.path.getsize(path)
 
 
+    @staticmethod
     def isfile(path: PathLike) -> bool:
         """Checks if the given path is an existing File
 
@@ -382,6 +395,7 @@ class FileHandler:
         return os.path.isfile(path)
 
 
+    @staticmethod
     def verify(path: PathLike) -> bool:
         """Verify if a given path exists
 
@@ -397,6 +411,7 @@ class FileHandler:
         return os.path.exists(path)
 
 
+    @staticmethod
     def filetype(path: PathLike, sniff: bool = True) -> FileTypes:
         """Check the Filetype of a given Path
 
@@ -431,6 +446,7 @@ class FileHandler:
         return FileHandler._sniff_text(path_obj) if sniff else FileTypes.BIN
 
 
+    @staticmethod
     def mimetype(path: PathLike, sniff: bool = True) -> str:
         """Get the MIME type of a File, e.g. to tell Word, Excel and PowerPoint Files apart
 
@@ -473,6 +489,7 @@ class FileHandler:
         return "application/octet-stream"
 
 
+    @staticmethod
     def _sniff_mimetype(path: Path, suffix: str) -> str | None:
         """Detect the MIME type from the File's Magic Number
 
@@ -510,6 +527,7 @@ class FileHandler:
         return None
 
 
+    @staticmethod
     def _sniff_zip(path: Path, suffix: str) -> str:
         """Tell apart the Formats that are Zip Archives underneath (OOXML, OpenDocument, EPUB, JAR)
 
@@ -541,6 +559,7 @@ class FileHandler:
         return "application/zip"
 
 
+    @staticmethod
     def _sniff_text(path: Path, blocksize: int = 8192) -> FileTypes:
         """Guess the Filetype by inspecting the first Block of the File
 
@@ -568,6 +587,7 @@ class FileHandler:
         return FileTypes.TXT
 
 
+    @staticmethod
     def hash(path: PathLike) -> str:
         """Returns the SHA256 Hash of a File
 
@@ -585,6 +605,7 @@ class FileHandler:
             return hashlib.file_digest(file, "sha256").hexdigest()
 
 
+    @staticmethod
     def stats(path: PathLike) -> dict:
         """Returns the Statistics of a File or Directory
 
@@ -654,6 +675,7 @@ class FileHandler:
 
 
     #region Path Manipulation
+    @staticmethod
     def split(path: PathLike) -> tuple[str, str, str]:
         """Split a given Path into Directory, Filename, Extension
 
@@ -672,6 +694,7 @@ class FileHandler:
         return directory, filename, extension
 
 
+    @staticmethod
     def dirpath(path: PathLike) -> str:
         """Split a given Path and Return the Directory
 
@@ -688,6 +711,7 @@ class FileHandler:
         return directory
 
 
+    @staticmethod
     def filename(path: PathLike) -> str:
         """Split a given Path and Return the Filename
 
@@ -704,6 +728,7 @@ class FileHandler:
         return filename
 
 
+    @staticmethod
     def extension(path: PathLike) -> str:
         """Split a given Path and Return the File Extension
 
@@ -720,6 +745,7 @@ class FileHandler:
         return extension
 
 
+    @staticmethod
     def join(elements: list[PathLike]) -> str:
         """Merge a List of Path-parts into a single Path
 
@@ -738,6 +764,7 @@ class FileHandler:
         return os.path.join(*elements)
 
 
+    @staticmethod
     def abspath(path: PathLike) -> str:
         """Returns the Absolute Path
 
